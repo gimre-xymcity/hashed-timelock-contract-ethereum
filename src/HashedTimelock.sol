@@ -1,5 +1,3 @@
-pragma solidity ^0.5.0;
-
 /**
  * @title Hashed Timelock Contracts (HTLCs) on Ethereum ETH.
  *
@@ -18,8 +16,10 @@ pragma solidity ^0.5.0;
  *      withdraw funds the sender / creator of the HTLC can get their ETH
  *      back with this function.
  */
-contract HashedTimelock {
 
+pragma solidity ^0.8.13;
+
+contract HashedTimelock {
     event LogHTLCNew(
         bytes32 indexed contractId,
         address indexed sender,
@@ -39,7 +39,7 @@ contract HashedTimelock {
         uint timelock; // UNIX timestamp seconds - locked UNTIL this time
         bool withdrawn;
         bool refunded;
-        bytes32 preimage;
+        bytes preimage;
     }
 
     modifier fundsSent() {
@@ -50,16 +50,16 @@ contract HashedTimelock {
         // only requirement is the timelock time is after the last blocktime (now).
         // probably want something a bit further in the future then this.
         // but this is still a useful sanity check:
-        require(_time > now, "timelock time must be in the future");
+        require(_time > block.timestamp, "timelock time must be in the future");
         _;
     }
     modifier contractExists(bytes32 _contractId) {
         require(haveContract(_contractId), "contractId does not exist");
         _;
     }
-    modifier hashlockMatches(bytes32 _contractId, bytes32 _x) {
+    modifier hashlockMatches(bytes32 _contractId, bytes memory _x) {
         require(
-            contracts[_contractId].hashlock == sha256(abi.encodePacked(_x)),
+            contracts[_contractId].hashlock == sha256(abi.encodePacked(sha256(abi.encodePacked(_x)))),
             "hashlock hash does not match"
         );
         _;
@@ -67,14 +67,14 @@ contract HashedTimelock {
     modifier withdrawable(bytes32 _contractId) {
         require(contracts[_contractId].receiver == msg.sender, "withdrawable: not receiver");
         require(contracts[_contractId].withdrawn == false, "withdrawable: already withdrawn");
-        require(contracts[_contractId].timelock > now, "withdrawable: timelock time must be in the future");
+        require(contracts[_contractId].timelock > block.timestamp, "withdrawable: timelock time must be in the future");
         _;
     }
     modifier refundable(bytes32 _contractId) {
         require(contracts[_contractId].sender == msg.sender, "refundable: not sender");
         require(contracts[_contractId].refunded == false, "refundable: already refunded");
         require(contracts[_contractId].withdrawn == false, "refundable: already withdrawn");
-        require(contracts[_contractId].timelock <= now, "refundable: timelock not yet passed");
+        require(contracts[_contractId].timelock <= block.timestamp, "refundable: timelock not yet passed");
         _;
     }
 
@@ -85,7 +85,7 @@ contract HashedTimelock {
      * providing the reciever lock terms.
      *
      * @param _receiver Receiver of the ETH.
-     * @param _hashlock A sha-2 sha256 hash hashlock.
+     * @param _hashlock A double sha-2 sha256 hash hashlock.
      * @param _timelock UNIX epoch seconds time that the lock expires at.
      *                  Refunds can be made after this time.
      * @return contractId Id of the new HTLC. This is needed for subsequent
@@ -115,14 +115,14 @@ contract HashedTimelock {
             revert("Contract already exists");
 
         contracts[contractId] = LockContract(
-            msg.sender,
+            payable(msg.sender),
             _receiver,
             msg.value,
             _hashlock,
             _timelock,
             false,
             false,
-            0x0
+            new bytes(0)
         );
 
         emit LogHTLCNew(
@@ -140,10 +140,10 @@ contract HashedTimelock {
      * This will transfer the locked funds to their address.
      *
      * @param _contractId Id of the HTLC.
-     * @param _preimage sha256(_preimage) should equal the contract hashlock.
+     * @param _preimage sha256(sha256(_preimage)) should equal the contract hashlock.
      * @return bool true on success
      */
-    function withdraw(bytes32 _contractId, bytes32 _preimage)
+    function withdraw(bytes32 _contractId, bytes memory _preimage)
         external
         contractExists(_contractId)
         hashlockMatches(_contractId, _preimage)
@@ -181,7 +181,7 @@ contract HashedTimelock {
     /**
      * @dev Get contract details.
      * @param _contractId HTLC contract id
-     * @return All parameters in struct LockContract for _contractId HTLC
+     * @return sender in struct LockContract for _contractId HTLC
      */
     function getContract(bytes32 _contractId)
         public
@@ -194,11 +194,11 @@ contract HashedTimelock {
             uint timelock,
             bool withdrawn,
             bool refunded,
-            bytes32 preimage
+            bytes memory preimage
         )
     {
         if (haveContract(_contractId) == false)
-            return (address(0), address(0), 0, 0, 0, false, false, 0);
+            return (address(0), address(0), 0, 0, 0, false, false, new bytes(0));
         LockContract storage c = contracts[_contractId];
         return (
             c.sender,
